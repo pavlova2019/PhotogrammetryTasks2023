@@ -23,7 +23,7 @@
 
 #define GAUSSIAN_NOISE_STDDEV       1.0
 
-#define imread(path)           imread("../" + std::string(path))
+//#define imread(path)           imread("../" + std::string(path))
 
 
 // функция рисует кружки случайного цвета вокруг точек, но если для точки не нашлось сопоставления - кружок будет толстый и ярко красный
