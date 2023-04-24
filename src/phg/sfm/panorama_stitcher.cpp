@@ -4,6 +4,23 @@
 #include <libutils/bbox2.h>
 #include <iostream>
 
+void calc(int k, std::vector<cv::Mat> &Hs, std::vector<bool> &used,
+          const std::vector<cv::Mat> &imgs, const std::vector<int> &parent,
+          std::function<cv::Mat(const cv::Mat &, const cv::Mat &)> &homography_builder)
+{
+    if (used[k]) return;
+    used[k] = 1;
+
+    if (parent[k] == -1) {
+        Hs[k] = cv::Mat::eye(3, 3, CV_64FC1);
+        return;
+    }
+
+    calc(parent[k], Hs, used, imgs, parent, homography_builder);
+
+    Hs[k] = Hs[parent[k]] * homography_builder(imgs[k], imgs[parent[k]]);
+}
+
 /*
  * imgs - список картинок
  * parent - список индексов, каждый индекс указывает, к какой картинке должна быть приклеена текущая картинка
@@ -23,7 +40,12 @@ cv::Mat phg::stitchPanorama(const std::vector<cv::Mat> &imgs,
     {
         // здесь надо посчитать вектор Hs
         // при этом можно обойтись n_images - 1 вызовами функтора homography_builder
-        throw std::runtime_error("not implemented yet");
+
+        std::vector<bool> used(n_images, 0);
+
+        for (int i = 0; i < n_images; i++) {
+            calc(i, Hs, used, imgs, parent, homography_builder);
+        }
     }
 
     bbox2<double, cv::Point2d> bbox;
