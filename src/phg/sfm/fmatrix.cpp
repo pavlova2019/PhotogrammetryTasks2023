@@ -203,6 +203,8 @@ namespace {
         }
 
         return best_F;
+
+        return best_F;
     }
 
 }
