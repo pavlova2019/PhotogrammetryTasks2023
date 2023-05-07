@@ -47,14 +47,16 @@ namespace phg {
         return pixel_with_depth;
     }
 
-    // TODO 101 реализуйте unproject (вам поможет тест на идемпотентность project -> unproject в test_depth_maps_pm)
+    // T.ODO 101 реализуйте unproject (вам поможет тест на идемпотентность project -> unproject в test_depth_maps_pm)
     vector3d unproject(const vector3d &pixel, const phg::Calibration &calibration, const matrix34d &PtoWorld)
     {
         double depth = pixel[2]; // на самом деле это не глубина, это координата по оси +Z (вдоль которой смотрит камера в ее локальной системе координат)
 
-        vector3d local_point; // TODO 102 пустите луч pixel из calibration а затем возьмите ан нем точку у которой по оси +Z координата=depth
+        vector3d local_point = calibration.unproject(cv::Vec2d(pixel[0], pixel[1])) * depth;
+        // T.ODO 102 пустите луч pixel из calibration а затем возьмите ан нем точку у которой по оси +Z координата=depth
 
-        vector3d global_point; // TODO 103 переведите точку из локальной системы в глобальную
+        vector3d global_point = PtoWorld * homogenize(local_point);
+        // T.ODO 103 переведите точку из локальной системы в глобальную
 
         return global_point;
     }
@@ -99,6 +101,8 @@ namespace phg {
         timer t;
         verbose_cout << "Iteration #" << iter << "/" << NITERATIONS << ": refinement..." << std::endl;
 
+        std::vector<int> WTA(9, 0);
+
         #pragma omp parallel for schedule(dynamic, 1)
         for (ptrdiff_t j = 0; j < height; ++j) {
             for (ptrdiff_t i = 0; i < width; ++i) {
@@ -116,15 +120,20 @@ namespace phg {
                     n0 = normal_map.at<vector3f>(j, i);
 
                     // 2) случайной пертурбации текущей гипотезы (мутация и уточнение того что уже смогли найти)
-                    dp = r.nextf(d0 * 0.5f, d0 * 1.5); // TODO 104: сделайте так чтобы отклонение было тем меньше, чем номер итерации ближе к NITERATIONS, улучшило ли это результат?
-                    np = cv::normalize(n0 + randomNormalObservedFromCamera(cameras_RtoWorld[ref_cam], r) * 0.5); // TODO 105: сделайте так чтобы отклонение было тем меньше, чем номер итерации ближе к NITERATIONS, улучшило ли это результат?
+                    double diff = (NITERATIONS - iter) / (2 * NITERATIONS);
+                    dp = r.nextf(d0 * (1.f - diff), d0 * (1.f + diff)); 
+                    // T.ODO 104: сделайте так чтобы отклонение было тем меньше, чем номер итерации ближе к NITERATIONS, улучшило ли это результат?
+                    np = cv::normalize(n0 + randomNormalObservedFromCamera(cameras_RtoWorld[ref_cam], r) * diff);
+                    // T.ODO 105: сделайте так чтобы отклонение было тем меньше, чем номер итерации ближе к NITERATIONS, улучшило ли это результат?
+
+                    // Вроде, ничего особенного не заметно
 
                     dp = std::max(ref_depth_min, std::min(ref_depth_max, dp));
 
                     // 3) новой случайной гипотезы из фрустума поиска (новые идеи, вечный поиск во всем пространстве)
-                    // TODO 106: создайте случайную гипотезу dr+nr, вам поможет:
-                    //  - r.nextf(...)
-                    //  - ref_depth_min, ref_depth_max
+                    // T.ODO 106: создайте случайную гипотезу dr+nr, вам поможет:
+                    dr = r.nextf(ref_depth_min, ref_depth_max);
+                    nr = randomNormalObservedFromCamera(cameras_RtoWorld[ref_cam], r);
                     //  - randomNormalObservedFromCamera - поможет создать нормаль которая гарантированно смотрит на нас 
                 }
 
@@ -160,7 +169,10 @@ namespace phg {
                     if (total_cost < best_cost) {
                         best_depth  = d;
                         best_normal = n;
-                        best_cost   = total_cost; // TODO 206: добавьте подсчет статистики, какая комбинация гипотез чаще всего побеждает? есть ли комбинации на которых мы можем сэкономить? а какие гипотезы при refinement рассматривает например Colmap?
+                        best_cost   = total_cost;
+                        // T.ODO 206: добавьте подсчет статистики, какая комбинация гипотез чаще всего побеждает? есть ли комбинации на которых мы можем сэкономить? а какие гипотезы при refinement рассматривает например Colmap?
+                        // Кажется, больше всего побеждает (d0, np). А вот (d0, n0) вроде никогда, вообще тогда зачем она?
+                        WTA[hi] += 1;
                     }
                 }
 
@@ -172,6 +184,10 @@ namespace phg {
 
         verbose_cout << "refinement done in " << t.elapsed() << " s: ";
 #ifdef VERBOSE_LOGGING
+        verbose_cout << "Winners cnt:\n";
+        for (auto hi : WTA) verbose_cout << hi << " ";
+        verbose_cout << std::endl;
+
         printCurrentStats();
 #endif
 #ifdef DEBUG_DIR
@@ -351,31 +367,46 @@ namespace phg {
                 ptrdiff_t u = x;
                 ptrdiff_t v = y;
 
-                // TODO 108: добавьте проверку "попали ли мы в камеру номер neighb_cam?" если не попали - возвращаем NO_COST
+                // T.ODO 108: добавьте проверку "попали ли мы в камеру номер neighb_cam?" если не попали - возвращаем NO_COST
+
+                if ((u < 0 || u >= width) || (v < 0 || v >= height)) return NO_COST;
 
                 float intensity = cameras_imgs_grey[neighb_cam].at<unsigned char>(v, u) / 255.0f;
                 patch1.push_back(intensity);
             }
         }
 
-        // TODO 109: реализуйте ZNCC https://en.wikipedia.org/wiki/Cross-correlation#Zero-normalized_cross-correlation_(ZNCC)
+        // T.ODO 109: реализуйте ZNCC https://en.wikipedia.org/wiki/Cross-correlation#Zero-normalized_cross-correlation_(ZNCC)
         // или слайд #25 в лекции 5 про SGM и Cost-функции - https://my.compscicenter.ru/attachments/classes/slides_w2n8WNLY/photogrammetry_lecture_090321.pdf
         rassert(patch0.size() == patch1.size(), 12489185129326);
         size_t n = patch0.size();
         float mean0 = 0.0f;
         float mean1 = 0.0f;
-        // ...
+        float var0 = 0.f;
+        float var1 = 0.f;
         for (size_t k = 0; k < n; ++k) {
             float a = patch0[k];
             float b = patch1[k];
             mean0 += a;
             mean1 += b;
-            // ...
+            var0 += a*a;
+            var1 += b*b;
         }
         mean0 /= n;
         mean1 /= n;
-        // ...
+        var0 /= n;
+        var1 /= n;
+
         float zncc = 0.0f;
+
+        for (size_t k = 0; k < n; ++k) {
+            zncc += (patch0[k] - mean0) * (patch1[k] - mean1);
+        }
+
+        float q = (var0 - mean0*mean0) * (var1 - mean1*mean1);
+        if (std::abs(q) < 1e-5) return NO_COST;
+
+        zncc /= n * std::sqrt(q);
 
         // ZNCC в диапазоне [-1; 1], 1: идеальное совпадение, -1: ничего общего
         rassert(zncc == zncc, 23141241210380); // проверяем что не nan
@@ -399,15 +430,23 @@ namespace phg {
 
         float best_cost = costs[0];
 
-        float cost_sum = best_cost;
-        float cost_w = 1.0f;
+        float cost_sum = 0.f;
+        float cost_w = 0.f;
 
-        // TODO 110 реализуйте какое-то "усреднение cost-ов по всем соседям", с ограничением что участвуют только COSTS_BEST_K_LIMIT лучших
-        // TODO 111 добавьте к этому усреднению еще одно ограничение: если cost больше чем best_cost*COSTS_K_RATIO - то такой cost подозрительно плохой и мы его не хотим учитывать (вероятно occlusion)
-        // TODO 112 а что если в пикселе occlusion, но best_cost - большой и поэтому отсечение по best_cost*COSTS_K_RATIO не срабатывает? можно ли это отсечение как-то выправить для такого случая?
+        // T.ODO 110 реализуйте какое-то "усреднение cost-ов по всем соседям", с ограничением что участвуют только COSTS_BEST_K_LIMIT лучших
+        // T.ODO 111 добавьте к этому усреднению еще одно ограничение: если cost больше чем best_cost*COSTS_K_RATIO - то такой cost подозрительно плохой и мы его не хотим учитывать (вероятно occlusion)
+        // T.ODO 112 а что если в пикселе occlusion, но best_cost - большой и поэтому отсечение по best_cost*COSTS_K_RATIO не срабатывает? можно ли это отсечение как-то выправить для такого случая?
         // TODO 207 а что если добавить какой-нибудь бонус в случае если больше чем Х камер засчиталось? улучшается/ухудшается ли от этого что-то на herzjezu25? а при большем числе фотографий
 
-        float avg_cost = cost_sum / cost_w;
+        for (size_t i = 1; i < (size_t)COSTS_BEST_K_LIMIT && i < costs.size(); i++) {
+            if (costs[i] > best_cost * COSTS_K_RATIO) continue;
+            cost_sum += costs[i];
+            cost_w ++;
+        }
+
+        //В теории, можно добавить новый параметр COST_MAX, по которому вручную отсекать, но непонятно, как его настроить нормально
+
+        float avg_cost = cost_w > 0 ? cost_sum / cost_w : 0.f;
         return avg_cost;
     }
 
