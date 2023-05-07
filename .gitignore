@@ -1,5 +1,8 @@
 **/*_cl.h
 .idea
+.vscode
 build
+data/*
+run.sh
 cmake-build*
 data/src/test_sfm/saharov/*.JPG
