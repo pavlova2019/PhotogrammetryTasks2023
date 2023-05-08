@@ -382,6 +382,7 @@ namespace phg {
         size_t n = patch0.size();
         float mean0 = 0.0f;
         float mean1 = 0.0f;
+        float var0 = 0.0f, var1 = 0.0f;
         for (size_t k = 0; k < n; ++k) {
             float a = patch0[k];
             float b = patch1[k];
