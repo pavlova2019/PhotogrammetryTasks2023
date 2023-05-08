@@ -52,7 +52,7 @@ namespace phg {
     {
         double depth = pixel[2]; // на самом деле это не глубина, это координата по оси +Z (вдоль которой смотрит камера в ее локальной системе координат)
 
-        vector3d local_point = calibration.unproject(cv::Vec2d(pixel[0], pixel[1])) * depth;
+        vector3d local_point = calibration.unproject(vector2d(pixel[0], pixel[1])) * depth;
         // T.ODO 102 пустите луч pixel из calibration а затем возьмите ан нем точку у которой по оси +Z координата=depth
 
         vector3d global_point = PtoWorld * homogenize(local_point);
@@ -120,7 +120,7 @@ namespace phg {
                     n0 = normal_map.at<vector3f>(j, i);
 
                     // 2) случайной пертурбации текущей гипотезы (мутация и уточнение того что уже смогли найти)
-                    double diff = (NITERATIONS - iter) / (2 * NITERATIONS);
+                    double diff = (NITERATIONS - iter + 0.f) / (2.f * NITERATIONS);
                     dp = r.nextf(d0 * (1.f - diff), d0 * (1.f + diff)); 
                     // T.ODO 104: сделайте так чтобы отклонение было тем меньше, чем номер итерации ближе к NITERATIONS, улучшило ли это результат?
                     np = cv::normalize(n0 + randomNormalObservedFromCamera(cameras_RtoWorld[ref_cam], r) * diff);
@@ -184,11 +184,11 @@ namespace phg {
 
         verbose_cout << "refinement done in " << t.elapsed() << " s: ";
 #ifdef VERBOSE_LOGGING
+        printCurrentStats();
+
         verbose_cout << "Winners cnt:\n";
         for (auto hi : WTA) verbose_cout << hi << " ";
         verbose_cout << std::endl;
-
-        printCurrentStats();
 #endif
 #ifdef DEBUG_DIR
         debugCurrentPoints(to_string(ref_cam) + "_" + to_string(iter) + "_refinement");
@@ -382,8 +382,6 @@ namespace phg {
         size_t n = patch0.size();
         float mean0 = 0.0f;
         float mean1 = 0.0f;
-        float var0 = 0.f;
-        float var1 = 0.f;
         for (size_t k = 0; k < n; ++k) {
             float a = patch0[k];
             float b = patch1[k];
@@ -430,8 +428,8 @@ namespace phg {
 
         float best_cost = costs[0];
 
-        float cost_sum = 0.f;
-        float cost_w = 0.f;
+        float cost_sum = best_cost;
+        float cost_w = 1.f;
 
         // T.ODO 110 реализуйте какое-то "усреднение cost-ов по всем соседям", с ограничением что участвуют только COSTS_BEST_K_LIMIT лучших
         // T.ODO 111 добавьте к этому усреднению еще одно ограничение: если cost больше чем best_cost*COSTS_K_RATIO - то такой cost подозрительно плохой и мы его не хотим учитывать (вероятно occlusion)
@@ -446,7 +444,7 @@ namespace phg {
 
         //В теории, можно добавить новый параметр COST_MAX, по которому вручную отсекать, но непонятно, как его настроить нормально
 
-        float avg_cost = cost_w > 0 ? cost_sum / cost_w : 0.f;
+        float avg_cost = cost_sum / cost_w;
         return avg_cost;
     }
 
